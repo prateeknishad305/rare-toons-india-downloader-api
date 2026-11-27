@@ -1,0 +1,427 @@
+openapi: 3.1.0
+info:
+  title: RareToons Downloader API
+  version: 1.0.0
+  summary: Catalogue and download links for rareanimes.foo
+  description: |
+    Exposes every anime series, episode, quality variant and download link, and
+    resolves host pages into direct file URLs.
+
+    Two deployments serve the same payload:
+
+    * WordPress plugin — `https://www.rareanimes.foo/wp-json/rai/v1`
+    * Standalone service — any host you point it at
+
+    Send the API key as `X-RAI-Key` or as an `api_key` query parameter when
+    authentication is switched on.
+  license:
+    name: GPL-2.0-or-later
+    identifier: GPL-2.0-or-later
+
+servers:
+  - url: https://www.rareanimes.foo/wp-json/rai/v1
+    description: WordPress plugin on the live site
+  - url: https://api.example.com
+    description: Standalone service
+
+security:
+  - ApiKeyHeader: []
+  - ApiKeyQuery: []
+
+paths:
+  /series:
+    get:
+      summary: List series
+      operationId: listSeries
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: category
+          in: query
+          description: Category id
+          schema: { type: integer }
+        - name: orderby
+          in: query
+          schema: { type: string, enum: [date, modified, title, id], default: date }
+        - name: order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+      responses:
+        '200':
+          description: A page of series
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeriesList'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /series/{slug}:
+    get:
+      summary: One series with every episode and link
+      operationId: getSeries
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: The series
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [series]
+                properties:
+                  series: { $ref: '#/components/schemas/Series' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /series/{slug}/episodes:
+    get:
+      summary: Episodes of one series
+      operationId: getEpisodes
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: The episode list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  series:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      slug: { type: string }
+                      title: { type: string }
+                      url: { type: string }
+                      type: { type: string }
+                      info: { $ref: '#/components/schemas/Info' }
+                  episodes:
+                    type: array
+                    items: { $ref: '#/components/schemas/Episode' }
+                  counts: { $ref: '#/components/schemas/Counts' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /series/{slug}/episodes/{number}:
+    get:
+      summary: One episode
+      operationId: getEpisode
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - name: number
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: The episode
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  episode: { $ref: '#/components/schemas/Episode' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /series/{slug}/episodes/{number}/links:
+    get:
+      summary: One episode with every link resolved to a direct file URL
+      operationId: getEpisodeLinks
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - name: number
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+        - name: refresh
+          in: query
+          description: Bypass the resolution cache
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: The episode, with a resolution block on every link
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  episode: { $ref: '#/components/schemas/Episode' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /resolve:
+    get:
+      summary: Resolve one host URL
+      operationId: resolveUrl
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+        - name: refresh
+          in: query
+          description: Bypass the resolution cache
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: The resolution
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Resolution' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /search:
+    get:
+      summary: Search the catalogue
+      operationId: search
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Matching series
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeriesList'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /categories:
+    get:
+      summary: Every category
+      operationId: getCategories
+      responses:
+        '200':
+          description: The category list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        slug: { type: string }
+
+  /stats:
+    get:
+      summary: Catalogue and host statistics
+      operationId: getStats
+      responses:
+        '200':
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  series: { type: integer }
+                  categories: { type: integer }
+                  generated_at: { type: string, format: date-time }
+                  cached: { type: boolean }
+                  hosts:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        label: { type: string }
+                        resolve: { type: boolean }
+                        hosts: { type: array, items: { type: string } }
+
+  /health:
+    get:
+      summary: Liveness check
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Service status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+                  plugin_version: { type: string }
+                  core_version: { type: string }
+                  php_version: { type: string }
+                  resolution: { type: boolean }
+                  time: { type: string, format: date-time }
+
+components:
+  securitySchemes:
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-RAI-Key
+    ApiKeyQuery:
+      type: apiKey
+      in: query
+      name: api_key
+
+  parameters:
+    Slug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9\-_]+$' }
+
+  responses:
+    BadRequest:
+      description: The request was not valid
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: The API key was missing or wrong
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: No such series or episode
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+
+    Info:
+      type: object
+      properties:
+        full_name: { type: string }
+        season: { type: string }
+        episode_count: { type: integer }
+        release_year: { type: string }
+        runtime: { type: string }
+        genres: { type: array, items: { type: string } }
+        languages: { type: array, items: { type: string } }
+        qualities: { type: array, items: { type: string } }
+        synopsis: { type: string }
+
+    Counts:
+      type: object
+      properties:
+        episodes: { type: integer }
+        links: { type: integer }
+        hosts:
+          type: object
+          additionalProperties: { type: integer }
+
+    Link:
+      type: object
+      properties:
+        label: { type: string }
+        url: { type: string, format: uri }
+        host: { type: string, enum: [hubcloud, pixeldrain, mega, argon, zipcloud, direct, external] }
+        host_label: { type: string }
+        file_id: { type: string, nullable: true }
+        resolvable: { type: boolean }
+        internal: { type: boolean }
+        resolution: { $ref: '#/components/schemas/Resolution' }
+
+    Variant:
+      type: object
+      properties:
+        label: { type: string }
+        links:
+          type: array
+          items: { $ref: '#/components/schemas/Link' }
+
+    Episode:
+      type: object
+      properties:
+        number: { type: integer, nullable: true }
+        title: { type: string, nullable: true }
+        variants:
+          type: array
+          items: { $ref: '#/components/schemas/Variant' }
+        series:
+          type: object
+          properties:
+            id: { type: integer }
+            slug: { type: string }
+            title: { type: string }
+            url: { type: string }
+
+    Resolution:
+      type: object
+      properties:
+        url: { type: string }
+        host: { type: string }
+        host_label: { type: string }
+        resolved: { type: boolean }
+        direct_url: { type: string, nullable: true }
+        filename: { type: string, nullable: true }
+        size: { type: integer, nullable: true }
+        size_human: { type: string, nullable: true }
+        mime_type: { type: string, nullable: true }
+        expires_at: { type: string, format: date-time, nullable: true }
+        requires_client: { type: boolean }
+        reason: { type: string, nullable: true }
+        resolved_at: { type: string, format: date-time }
+        cached: { type: boolean }
+        meta: { type: object, additionalProperties: true }
+
+    SeriesSummary:
+      type: object
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        title: { type: string }
+        url: { type: string }
+        type: { type: string, enum: [series, movie] }
+        updated_at: { type: string }
+        categories: { type: array, items: { type: string } }
+        description: { type: string }
+        info: { $ref: '#/components/schemas/Info' }
+        counts: { $ref: '#/components/schemas/Counts' }
+
+    Series:
+      allOf:
+        - $ref: '#/components/schemas/SeriesSummary'
+        - type: object
+          properties:
+            published_at: { type: string }
+            episodes:
+              type: array
+              items: { $ref: '#/components/schemas/Episode' }
+            cached: { type: boolean }
+
+    SeriesList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SeriesSummary' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        pages: { type: integer }
+        cached: { type: boolean }
